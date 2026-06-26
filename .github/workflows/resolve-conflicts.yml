@@ -16,18 +16,50 @@ on:
         type: string
         default: "10"
   schedule:
-    - cron: "5 23 * * *"  # 23:05 UTC == 08:05 JST, daily
+    - cron: "*/15 * * * *"  # every 15 min; the guard job below drops a tick if a run is still active
 
 permissions:
   contents: read
   id-token: write   # claude-code-action fetches a GitHub OIDC token during setup
 
-concurrency:
-  group: resolve-conflicts
-  cancel-in-progress: false
+# No `concurrency` group on purpose. A group with cancel-in-progress:false would QUEUE a
+# scheduled tick that arrives mid-run and run it right after — but we want such ticks
+# SKIPPED. Overlap is instead prevented by the `guard` job below (it drops the run when an
+# older run of this workflow is still active).
 
 jobs:
+  # ---- Skip-guard (no AI): drop this run if another, older run is still active ----------
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}   # PAT: read this repo's workflow runs
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+    steps:
+      - name: Skip if another run of this workflow is already active
+        id: check
+        shell: bash
+        run: |
+          # Manual dispatch always proceeds. For scheduled ticks, yield to any OLDER active run
+          # (run ids increase monotonically) so runs never overlap; if two ever race, exactly
+          # one (the oldest) proceeds.
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "manual dispatch — proceeding"; echo "proceed=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          active=$(gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/resolve-conflicts.yml/runs?per_page=100" \
+            --jq "[.workflow_runs[] | select(.status != \"completed\") | select(.id < $GITHUB_RUN_ID)] | length" 2>/dev/null)
+          if [ "${active:-0}" -gt 0 ]; then
+            echo "Another run is already active ($active older run(s)) — skipping this tick."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "### Resolve PR Conflicts — skipped (another run already active)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "no older active run — proceeding"; echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
   resolve:
+    needs: guard
+    if: needs.guard.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
