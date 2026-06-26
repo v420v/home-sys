@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45   # deep, corner-to-corner review with opus takes longer
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Suggest improvement issues with Claude
         uses: anthropics/claude-code-action@v1

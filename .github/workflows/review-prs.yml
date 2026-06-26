@@ -152,7 +152,7 @@ jobs:
       fail-fast: false    # one failed review must not cancel the others
       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Review ${{ matrix.repo }}#${{ matrix.number }}
         uses: anthropics/claude-code-action@v1
