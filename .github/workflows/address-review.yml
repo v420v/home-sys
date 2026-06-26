@@ -1,0 +1,216 @@
+name: Address Review Feedback
+
+# Plain GitHub Actions workflow (NOT gh-aw): runs Anthropic's official Claude Code
+# Action authenticated with a Claude Max subscription (CLAUDE_CODE_OAUTH_TOKEN), so model
+# usage is covered by your Max plan — no extra API/Copilot billing.
+#
+# The "redo" worker. For each of your open PRs whose latest autopilot review verdict is
+# `changes-requested` (recorded by the review-prs workflow as a marker comment), it reads
+# the findings, checks out the PR's head branch, applies fixes scoped to those findings,
+# and pushes to the SAME branch — updating the PR in place. The new head SHA makes the next
+# review-prs run re-review; the loop converges when the review passes, or stops at
+# `max_rounds` (the fixer never acts on the final round — that one is left for you).
+#
+# Architecture mirrors implement-issues: a deterministic `discover` job (gh only, no AI)
+# selects PRs whose marker == changes-requested AND still points at the current head AND is
+# under the round cap; `fix` runs one Claude agent per PR.
+
+on:
+  # Chain: run right after the Review Pull Requests workflow finishes, so the freshest
+  # changes-requested verdicts exist first.
+  workflow_run:
+    workflows: ["Review Pull Requests"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (apply fixes locally and show the diff; do NOT push or comment)"
+        type: boolean
+        default: false
+      max_prs:
+        description: "Max PRs to fix this run, across all repos"
+        type: string
+        default: "10"
+      max_rounds:
+        description: "Round cap (must match review-prs); the fixer skips the final round"
+        type: string
+        default: "3"
+
+permissions:
+  contents: read
+
+# Never let two runs overlap — protects the marker-based state machine from races.
+concurrency:
+  group: address-review
+  cancel-in-progress: false
+
+jobs:
+  # ---- 1. Pick PRs whose latest verdict requests changes (deterministic; no AI) ---------
+  discover:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }} # PAT: search your PRs + read PR comments
+      MAX_PRS: ${{ inputs.max_prs || '10' }}
+      MAX_ROUNDS: ${{ inputs.max_rounds || '3' }}
+    outputs:
+      matrix: ${{ steps.find.outputs.matrix }}
+      has_work: ${{ steps.find.outputs.has_work }}
+    steps:
+      - name: Find PRs with changes requested
+        id: find
+        shell: bash
+        run: |
+          ME=$(gh api user --jq .login)
+          if [ -z "$ME" ]; then echo "gh auth failed (empty login)"; exit 1; fi
+          echo "Authenticated as: $ME"
+          set +e
+
+          MAX="${MAX_PRS:-10}"
+          CAP="${MAX_ROUNDS:-3}"
+          items='[]'
+          count=0
+
+          urls=$(gh search prs --author "@me" --state open "archived:false" --json url --limit 100 --jq '.[].url')
+          for url in $urls; do
+            [ "$count" -ge "$MAX" ] && break
+            R=$(printf '%s' "$url" | sed -n 's#https://github.com/\([^/]*/[^/]*\)/pull/.*#\1#p')
+            n=$(printf '%s' "$url" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')
+            { [ -z "$R" ] || [ -z "$n" ]; } && continue
+
+            view=$(gh pr view "$n" --repo "$R" --json headRefOid,headRefName,state,comments 2>/dev/null)
+            [ -z "$view" ] && continue
+            [ "$(printf '%s' "$view" | jq -r '.state')" != "OPEN" ] && continue
+            sha=$(printf '%s' "$view" | jq -r '.headRefOid')
+
+            marker=$(printf '%s' "$view" | jq -r '.comments[].body' \
+              | grep -o '<!-- autopilot-review headSha=[^ ]* verdict=[^ ]* round=[0-9]* -->' | tail -n1)
+            [ -z "$marker" ] && continue
+            mSha=$(printf '%s' "$marker" | sed -n 's/.*headSha=\([^ ]*\).*/\1/p')
+            mVer=$(printf '%s' "$marker" | sed -n 's/.*verdict=\([^ ]*\).*/\1/p')
+            mRnd=$(printf '%s' "$marker" | sed -n 's/.*round=\([0-9][0-9]*\).*/\1/p')
+            [ -z "$mRnd" ] && mRnd=0
+
+            # Fix ONLY when: the latest verdict requests changes; it was issued for the CURRENT
+            # head (i.e. not already fixed since); and we are under the cap (the final round is
+            # deliberately left for the human, never auto-fixed).
+            [ "$mVer" != "changes-requested" ] && { echo "skip ${R}#${n}: verdict ${mVer:-none}"; continue; }
+            if [ "$mSha" != "$sha" ]; then echo "skip ${R}#${n}: review is stale (head moved)"; continue; fi
+            if [ "$mRnd" -ge "$CAP" ]; then echo "skip ${R}#${n}: round $mRnd at cap $CAP — left for human"; continue; fi
+
+            items=$(printf '%s' "$items" | jq -c --arg r "$R" --argjson n "$n" --argjson rd "$mRnd" \
+              '. + [{repo:$r,number:$n,round:$rd}]')
+            count=$((count + 1))
+            echo "queue ${R}#${n}: address review round ${mRnd}"
+          done
+
+          echo "Queued ${count} PR(s) to fix (cap ${MAX})."
+          printf 'matrix=%s\n' "$(printf '%s' "$items" | jq -c '{include: .}')" >> "$GITHUB_OUTPUT"
+          if [ "$count" -gt 0 ]; then echo "has_work=true" >> "$GITHUB_OUTPUT"; else echo "has_work=false" >> "$GITHUB_OUTPUT"; fi
+          {
+            echo "### Address Review — discovery"
+            echo "Queued **${count}** PR(s) to fix (cap ${MAX})."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---- 2. Apply the requested changes, one Claude agent per PR --------------------------
+  fix:
+    needs: discover
+    if: needs.discover.outputs.has_work == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write # claude-code-action fetches a GitHub OIDC token during setup
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Address review on ${{ matrix.repo }}#${{ matrix.number }}
+        uses: anthropics/claude-code-action@v1
+        env:
+          # PAT with `repo` + `workflow` scope: clone, push the head branch, comment.
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        with:
+          # Claude Max subscription auth (run `claude setup-token` locally to mint it).
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Authenticate git/gh with the PAT so the agent can clone/push ACROSS repos.
+          github_token: ${{ secrets.GH_TOKEN }}
+          claude_args: |
+            --model sonnet
+            --max-turns 200
+            --allowedTools Bash,Read,Edit,Write,Grep,Glob
+          # sonnet keeps Max-quota use reasonable for code work; bump to `opus` for harder fixes.
+          prompt: |
+            You are the "redo" worker. You take ONE pull request that a reviewer marked
+            **changes-requested** and apply EXACTLY the fixes the review asked for, pushing to
+            the PR's own head branch so the PR updates in place. Touch nothing unrelated.
+
+            Target: **${{ matrix.repo }}** PR **#${{ matrix.number }}** (review round ${{ matrix.round }}).
+            Dry run: `${{ inputs.dry_run || 'false' }}` — if `true`, apply fixes locally and show
+            the diff, but do NOT push or comment.
+
+            `gh` is authenticated via the `GH_TOKEN` environment variable (a PAT). Run
+            `gh auth status` first; if it fails, stop and report it.
+
+            ## Step 1 — Read the review findings (your spec)
+            1. `gh pr view ${{ matrix.number }} --repo ${{ matrix.repo }} --json state,headRefName,headRefOid,headRepository,headRepositoryOwner,isCrossRepository,comments,url`.
+               If state is not OPEN, stop and report it.
+            2. From `comments`, take the LATEST comment containing
+               `<!-- autopilot-review ... verdict=changes-requested ... -->`. Its body IS your
+               to-do list. If the latest such marker is NOT changes-requested, or its
+               `headSha` differs from the current `headRefOid`, the review is stale — stop and
+               report "no current changes-requested review" (do nothing).
+            3. Note HEAD_REPO (`headRepositoryOwner.login`/`headRepository.name`) and
+               HEAD_BRANCH (`headRefName`) — you push back to these.
+
+            ## Step 2 — Check out the PR's head branch (writable)
+            `WORKDIR=$(mktemp -d "$PWD/.fix-XXXXXX")` (inside the workspace so your edit tools
+            may write there), then
+            `git clone --branch <HEAD_BRANCH> --single-branch "https://x-access-token:$GH_TOKEN@github.com/<HEAD_REPO>.git" "$WORKDIR"`.
+            Set identity: `git -C "$WORKDIR" config user.name "claude[bot]"`,
+            `git -C "$WORKDIR" config user.email "claude[bot]@users.noreply.github.com"`,
+            `git -C "$WORKDIR" config core.hooksPath /dev/null`, `git -C "$WORKDIR" config commit.gpgSign false`.
+
+            ## Step 3 — Apply the fixes
+            Address EVERY finding in the review, one by one (Read the cited files, then Edit/Write).
+            Stay tightly scoped to the findings — no unrelated refactors or drive-by changes. If a
+            finding is wrong or impossible, do NOT force a change; record that you're pushing back
+            on it (you'll say so in the comment) and move on.
+
+            ## Step 4 — Verify
+            Detect the toolchain and run the project's tests / build / lint if present
+            (npm|pnpm|yarn, pytest, go test, cargo test, make, nix, …). Network is available so you
+            may install deps. Record results; don't block on pre-existing unrelated failures, but
+            do not introduce new ones.
+
+            ## Step 5 — Push and report  (if Dry run is `true`, print the diff and STOP here)
+            1. `git -C "$WORKDIR" add -A` and commit:
+               `git -C "$WORKDIR" commit -m "fix: address review round ${{ matrix.round }} (#${{ matrix.number }})"`.
+               (If nothing changed because you pushed back on every finding, skip the push and just
+               post the comment in step 5.2 explaining why — do NOT push an empty commit.)
+            2. Push to the same head branch: `git -C "$WORKDIR" push origin HEAD:<HEAD_BRANCH>`.
+            3. Comment on the PR so the next review round picks it up. Start the body with the
+               marker on its own first line (keep the format byte-for-byte):
+
+                   <!-- autopilot-fix round=${{ matrix.round }} -->
+                   ## 🤖 Addressed review (round ${{ matrix.round }})
+
+                   <bulleted list: each finding → what you changed (or why you pushed back)>
+                   <test/build result>
+                   Ready for re-review.
+
+               `gh pr comment ${{ matrix.number }} --repo ${{ matrix.repo }} --body "<the above>"`.
+               Best-effort label flip for visibility (ignore failures):
+               `gh pr edit ${{ matrix.number }} --repo ${{ matrix.repo }} --add-label "autopilot:needs-review" --remove-label "autopilot:changes-requested"`.
+            4. Clean up: `rm -rf "$WORKDIR"`.
+
+            ## Step 6 — Summary
+            Append to `$GITHUB_STEP_SUMMARY`: repo, PR #, round, # findings addressed, # pushed
+            back on, test result, the new commit pushed (or "dry-run"), and — verbatim — any error.
+            If a required step (push / comment) fails, append the exact error and exit non-zero.
