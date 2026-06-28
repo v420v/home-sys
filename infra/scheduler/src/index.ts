@@ -86,15 +86,20 @@ async function dispatchWorkflow(
   return { workflowFile, ok: false, status: res.status, detail };
 }
 
-async function runCron(env: Env, cron: string): Promise<void> {
+async function runCron(env: Env, cron: string): Promise<DispatchResult[]> {
   const workflows = SCHEDULES[normalizeCron(cron)] ?? [];
   if (workflows.length === 0) {
     console.warn(`no workflows mapped for cron "${cron}"`);
-    return;
+    return [];
   }
   // allSettled so one failing dispatch never blocks the others.
-  await Promise.allSettled(
+  const settled = await Promise.allSettled(
     workflows.map((workflow) => dispatchWorkflow(env, workflow)),
+  );
+  return settled.map((s) =>
+    s.status === "fulfilled"
+      ? s.value
+      : { workflowFile: "unknown", ok: false, error: String(s.reason) },
   );
 }
 
@@ -102,7 +107,13 @@ export default {
   // The runtime keeps the Worker alive until this promise settles, so we await
   // directly instead of using ctx.waitUntil.
   async scheduled(controller, env): Promise<void> {
-    await runCron(env, controller.cron);
+    const results = await runCron(env, controller.cron);
+    const failed = results.filter((r) => !r.ok);
+    if (failed.length > 0) {
+      throw new Error(
+        `workflow_dispatch failed: ${failed.map((f) => `${f.workflowFile}(${f.status ?? f.error})`).join(", ")}`,
+      );
+    }
   },
 
   // Health endpoint: no side effects, returns no secrets — safe to expose.
