@@ -81,4 +81,11 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
       - run: terraform fmt -check -recursive
       - run: terraform init -backend=false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: infra/scheduler
+      - run: npm run build
+        working-directory: infra/scheduler
       - run: terraform validate
