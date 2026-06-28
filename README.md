@@ -10,7 +10,7 @@ flowchart LR
     S["suggest-issues<br/>(daily)"] -->|opens| I["Issues"]
     I --> M["implement-issues<br/>(after suggest-issues)"]
     M -->|draft| P["Pull Requests"]
-    R["resolve-conflicts<br/>(daily)"] -->|keep mergeable| P
+    R["resolve-conflicts<br/>(every 15m)"] -->|keep mergeable| P
     P --> V["review-prs<br/>(after implement)"]
     V -->|changes requested| A["address-review"]
     A -->|push fixes| P
@@ -29,11 +29,11 @@ flowchart LR
 
 | Workflow | What it does | Trigger |
 | --- | --- | --- |
-| [resolve-conflicts](.github/workflows/resolve-conflicts.yml) | Auto-resolve merge conflicts on your open PRs | daily + manual |
+| [resolve-conflicts](.github/workflows/resolve-conflicts.yml) | Auto-resolve merge conflicts on your open PRs | every 15m + manual |
 | [suggest-issues](.github/workflows/suggest-issues.yml) | Review your starred-own repos; open improvement/bug issues | daily + manual |
 | [implement-issues](.github/workflows/implement-issues.yml) | Implement open issues as draft PRs | after suggest-issues + manual |
-| [review-prs](.github/workflows/review-prs.yml) | Review your open PRs for correctness; record an approve / changes-requested verdict on each | after implement-issues / address-review + daily + manual |
-| [address-review](.github/workflows/address-review.yml) | Read changes-requested verdicts and push fixes to the PR's head branch (the "redo" worker) | after review-prs + manual |
+| [review-prs](.github/workflows/review-prs.yml) | Review your open PRs for correctness; record an approve / changes-requested verdict on each | after implement-issues / address-review + every 15m + manual |
+| [address-review](.github/workflows/address-review.yml) | Read changes-requested verdicts and push fixes to the PR's head branch (the "redo" worker) | after review-prs + every 15m + manual |
 
 The **review-prs ⇄ address-review** loop is bounded: `review-prs` records a verdict in a
 machine-readable marker comment on the PR, `address-review` fixes and pushes (moving the head
