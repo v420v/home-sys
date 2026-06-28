@@ -1,0 +1,168 @@
+name: Slack Status Board
+
+# Slack status board for the autopilot workflows. A cheap, AI-free workflow that keeps ONE
+# self-updating message in #autopilot-status showing, per tracked workflow: the last run time,
+# the last run status, and the (estimated) next scheduled run. It NEVER runs Claude.
+#
+# Triggers: every 15 min (matches the busy workflows' cadence) + right after any tracked
+# workflow completes (so the board reflects the newest result promptly) + manual dispatch.
+#
+# It maintains a single living message via Slack `chat.update`; the message ts is stored in the
+# repo variable SLACK_BOARD_TS. GitHub does NOT expose "next scheduled run", so that field is
+# COMPUTED from each workflow's cron and shown as an estimate (≈) — GitHub cron is UTC and
+# best-effort (it can be delayed/skipped, and is auto-disabled after 60 days of inactivity).
+#
+# One-time setup (outside this repo): create a Slack app with the `chat:write` bot scope,
+# invite its bot user to #autopilot-status, then add to this repo:
+#   - secret   SLACK_BOT_TOKEN   = xoxb-…
+#   - variable SLACK_CHANNEL_ID  = C…   (the channel id)
+# The existing GH_TOKEN PAT is reused for run reads and for managing the SLACK_BOARD_TS variable.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *" # every 15 min, matching the tracked workflows' cadence
+  workflow_run:
+    workflows:
+      - "Review Pull Requests"
+      - "Address Review Feedback"
+      - "Resolve PR Conflicts"
+      - "Suggest Improvement Issues"
+      - "Implement Issues"
+    types: [completed] # refresh on ANY conclusion (we want failures shown too)
+  workflow_dispatch:
+
+permissions:
+  contents: read # all GitHub/Slack calls use the PAT + bot token below
+
+# Only the latest board state matters — cancel an in-flight refresh when a newer one starts.
+# (No skip-guard needed: this job is idempotent and cheap.)
+concurrency:
+  group: slack-status
+  cancel-in-progress: true
+
+jobs:
+  board:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }} # PAT: read workflow runs + manage SLACK_BOARD_TS
+      REPO: ${{ github.repository }}
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_CHANNEL_ID: ${{ vars.SLACK_CHANNEL_ID }}
+    steps:
+      - name: Build and post the status board
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${SLACK_BOT_TOKEN:?SLACK_BOT_TOKEN secret is not set}"
+          : "${SLACK_CHANNEL_ID:?SLACK_CHANNEL_ID variable is not set}"
+          now=$(date -u +%s)
+          # --- helpers ---------------------------------------------------------------------
+          fmt_when() {  # epoch -> JST: HH:MM if today, else M/D HH:MM
+            local e="$1" today d
+            today=$(TZ=Asia/Tokyo date '+%Y-%m-%d')
+            d=$(TZ=Asia/Tokyo date -d "@$e" '+%Y-%m-%d')
+            if [ "$d" = "$today" ]; then TZ=Asia/Tokyo date -d "@$e" '+%H:%M'
+            else TZ=Asia/Tokyo date -d "@$e" '+%-m/%-d %H:%M'; fi
+          }
+          fmt_dur() {  # seconds -> human (Xs / Xm / XhYm)
+            local s="$1"
+            [ "$s" -lt 0 ] && { echo ""; return; }
+            if   [ "$s" -lt 60 ];   then echo "${s}s"
+            elif [ "$s" -lt 3600 ]; then echo "$((s/60))m"
+            else echo "$((s/3600))h$(((s%3600)/60))m"; fi
+          }
+          next_run() {  # cron, state -> "≈ HH:MM JST" estimate (or — for none/chained/disabled)
+            local cron="$1" state="$2" next today d out
+            case "$state" in disabled*) echo "— (停止中)"; return;; esac
+            case "$cron" in
+              "")             echo "— (連鎖)"; return;;
+              "*/15 * * * *") next=$(( (now/900 + 1) * 900 ));;
+              "0 18 * * *")   next=$(date -u -d 'today 18:00' +%s); [ "$next" -le "$now" ] && next=$(( next + 86400 ));;
+              *)              echo "—"; return;;
+            esac
+            today=$(TZ=Asia/Tokyo date '+%Y-%m-%d')
+            d=$(TZ=Asia/Tokyo date -d "@$next" '+%Y-%m-%d')
+            out=$(TZ=Asia/Tokyo date -d "@$next" '+%H:%M')
+            [ "$d" != "$today" ] && out="翌 $out"
+            echo "≈ $out JST"
+          }
+          # --- build Block Kit blocks ------------------------------------------------------
+          blocks=$(jq -n '[{type:"header", text:{type:"plain_text", text:"🤖 Autopilot — Workflow Status", emoji:true}}]')
+          # name | workflow file | cron (empty cron = chain-triggered, no schedule)
+          workflows=(
+            "Review Pull Requests|review-prs.yml|*/15 * * * *"
+            "Address Review Feedback|address-review.yml|*/15 * * * *"
+            "Resolve PR Conflicts|resolve-conflicts.yml|*/15 * * * *"
+            "Suggest Improvement Issues|suggest-issues.yml|0 18 * * *"
+            "Implement Issues|implement-issues.yml|"
+          )
+          for entry in "${workflows[@]}"; do
+            IFS='|' read -r name file cron <<< "$entry"
+            [ -z "$name" ] && continue
+            run=$(gh api "/repos/$REPO/actions/workflows/$file/runs?branch=main&per_page=1" --jq '.workflow_runs[0] // empty' 2>/dev/null || true)
+            state=$(gh api "/repos/$REPO/actions/workflows/$file" --jq '.state' 2>/dev/null || echo unknown)
+            url=""; dur=""
+            if [ -z "$run" ]; then
+              emoji="➖"; stat="no runs"; last="—"
+            else
+              status=$(echo "$run" | jq -r '.status')
+              concl=$(echo "$run" | jq -r '.conclusion // ""')
+              url=$(echo "$run" | jq -r '.html_url')
+              se=$(date -u -d "$(echo "$run" | jq -r '.run_started_at // .created_at')" +%s)
+              ue=$(date -u -d "$(echo "$run" | jq -r '.updated_at')" +%s)
+              last=$(fmt_when "$se")
+              if [ "$status" != "completed" ]; then
+                emoji="⏳"; stat="${status//_/ }"
+              else
+                case "$concl" in
+                  success) emoji="✅";; failure) emoji="❌";; cancelled) emoji="⚪";;
+                  skipped) emoji="⏭️";; timed_out) emoji="⏱️";; *) emoji="⚠️";;
+                esac
+                stat="${concl//_/ }"; dur=$(fmt_dur "$((ue - se))")
+              fi
+            fi
+            case "$state" in disabled*) emoji="🚫";; esac
+            line="last ${last}"
+            [ -n "$stat" ] && line="${line} · ${stat}"
+            [ -n "$dur" ]  && line="${line} · ${dur}"
+            line="${line}   ·   next $(next_run "$cron" "$state")"
+            text="${emoji} *${name}*"$'\n'"${line}"
+            section=$(jq -n --arg file "$file" --arg text "$text" --arg url "$url" '
+              {type:"section", block_id:("wf:"+$file), text:{type:"mrkdwn", text:$text}}
+              + (if $url != "" then {accessory:{type:"button", action_id:("logs:"+$file), text:{type:"plain_text", text:"logs"}, url:$url}} else {} end)')
+            blocks=$(echo "$blocks" | jq --argjson s "$section" '. + [$s]')
+          done
+          updated=$(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M JST')
+          blocks=$(echo "$blocks" | jq --arg u "updated $updated" '. + [{type:"context", elements:[{type:"mrkdwn", text:$u}]}]')
+          payload=$(jq -n --arg ch "$SLACK_CHANNEL_ID" --arg text "Autopilot — Workflow Status" --argjson blocks "$blocks" \
+            '{channel:$ch, text:$text, blocks:$blocks}')
+          # --- post or update the single living board message ------------------------------
+          slack() { curl -sS -X POST "https://slack.com/api/$1" \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H 'Content-type: application/json; charset=utf-8' --data "$2"; }
+          TS=$(gh api "/repos/$REPO/actions/variables/SLACK_BOARD_TS" --jq '.value' 2>/dev/null || true)
+          posted=""
+          if [ -n "$TS" ]; then
+            resp=$(slack chat.update "$(echo "$payload" | jq --arg ts "$TS" '. + {ts:$ts}')")
+            if [ "$(echo "$resp" | jq -r '.ok')" = "true" ]; then
+              posted="updated existing board"
+            else
+              err=$(echo "$resp" | jq -r '.error // "unknown"')
+              case "$err" in
+                message_not_found|cant_update_message) echo "board message gone ($err) — reposting"; TS="";;
+                *) echo "chat.update failed: $err"; echo "$resp"; exit 1;;
+              esac
+            fi
+          fi
+          if [ -z "$posted" ]; then
+            resp=$(slack chat.postMessage "$payload")
+            if [ "$(echo "$resp" | jq -r '.ok')" != "true" ]; then
+              echo "chat.postMessage failed: $(echo "$resp" | jq -r '.error // "unknown"')"; echo "$resp"; exit 1
+            fi
+            newts=$(echo "$resp" | jq -r '.ts')
+            gh variable set SLACK_BOARD_TS --repo "$REPO" --body "$newts"
+            posted="posted new board (ts=$newts; saved SLACK_BOARD_TS)"
+          fi
+          echo "Slack board: $posted"
+          echo "### Slack Status Board — $posted" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
