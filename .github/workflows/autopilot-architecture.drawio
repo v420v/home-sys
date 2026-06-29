@@ -1,0 +1,106 @@
+<mxfile host="Electron">
+  <diagram name="Autopilot Architecture" id="autopilot-arch">
+    <mxGraphModel dx="2388" dy="2612" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1620" pageHeight="1090" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="frame" parent="1" style="rounded=0;html=1;dashed=0;strokeColor=#232F3E;strokeWidth=2;fillColor=none;verticalAlign=top;align=left;spacingLeft=14;spacingTop=8;fontColor=#232F3E;fontSize=15;fontStyle=1;" value="" vertex="1">
+          <mxGeometry height="960" width="1420" x="170" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="gh" parent="1" style="rounded=0;html=1;dashed=0;strokeColor=#24292f;strokeWidth=1.5;fillColor=#f6f8fa;verticalAlign=top;align=left;spacingLeft=46;spacingTop=12;fontColor=#24292f;fontSize=15;fontStyle=1;" value="GitHub" vertex="1">
+          <mxGeometry height="870" width="615" x="210" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="cfbox" parent="1" style="rounded=0;html=1;dashed=0;strokeColor=#f38020;strokeWidth=1.5;fillColor=#fff7ef;verticalAlign=top;align=left;spacingLeft=46;spacingTop=12;fontColor=#b35900;fontSize=15;fontStyle=1;" value="Cloudflare" vertex="1">
+          <mxGeometry height="330" width="490" x="865" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="grpEx" parent="1" style="rounded=0;html=1;dashed=1;dashPattern=8 4;strokeColor=#879196;strokeWidth=1.5;fillColor=none;verticalAlign=top;align=left;spacingLeft=12;spacingTop=8;fontColor=#5a6c86;fontSize=13;fontStyle=1;" value="External Services" vertex="1">
+          <mxGeometry height="360" width="490" x="865" y="580" as="geometry" />
+        </mxCell>
+        <mxCell id="grpAD" parent="1" style="rounded=0;html=1;dashed=1;dashPattern=8 4;strokeColor=#6c8ebf;strokeWidth=1.5;fillColor=none;verticalAlign=top;align=left;spacingLeft=12;spacingTop=8;fontColor=#3a5a8c;fontSize=13;fontStyle=1;" value="Auto Deploy" vertex="1">
+          <mxGeometry height="150" width="560" x="235" y="205" as="geometry" />
+        </mxCell>
+        <mxCell id="grpBatch" parent="1" style="rounded=0;html=1;dashed=1;dashPattern=8 4;strokeColor=#6c8ebf;strokeWidth=1.5;fillColor=none;verticalAlign=top;align=left;spacingLeft=12;spacingTop=8;fontColor=#3a5a8c;fontSize=13;fontStyle=1;" value="Batch Jobs" vertex="1">
+          <mxGeometry height="425" width="560" x="235" y="410" as="geometry" />
+        </mxCell>
+        <mxCell id="ghmark" parent="1" style="shape=image;html=1;imageAspect=0;aspect=fixed;verticalLabelPosition=bottom;verticalAlign=top;labelBackgroundColor=none;fontSize=12;fontStyle=1;image=https://cdn.jsdelivr.net/gh/devicons/devicon/icons/github/github-original.svg" value="" vertex="1">
+          <mxGeometry height="24" width="24" x="224" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="cfmark" parent="1" style="shape=image;html=1;imageAspect=0;aspect=fixed;verticalLabelPosition=bottom;verticalAlign=top;labelBackgroundColor=none;fontSize=12;fontStyle=1;image=https://unpkg.com/@lobehub/icons-static-svg@1.91.0/icons/cloudflare-color.svg" value="" vertex="1">
+          <mxGeometry height="24" width="24" x="879" y="210" as="geometry" />
+        </mxCell>
+        <mxCell id="developer" parent="1" style="sketch=0;outlineConnect=0;gradientColor=none;fontColor=#545B64;strokeColor=none;fillColor=#879196;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;aspect=fixed;shape=mxgraph.aws4.illustration_users;pointerEvents=1;" value="Developer&#xa;開発者" vertex="1">
+          <mxGeometry height="90" width="90" x="40" y="500" as="geometry" />
+        </mxCell>
+        <mxCell id="deploy" parent="1" style="shape=image;html=1;imageAspect=0;aspect=fixed;verticalLabelPosition=bottom;verticalAlign=top;labelBackgroundColor=none;fontSize=12;fontStyle=1;image=https://cdn.jsdelivr.net/gh/devicons/devicon/icons/githubactions/githubactions-original.svg" value="deploy-scheduler.yml" vertex="1">
+          <mxGeometry height="56" width="56" x="320" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="tf" parent="1" style="shape=image;html=1;imageAspect=0;aspect=fixed;verticalLabelPosition=bottom;verticalAlign=top;labelBackgroundColor=none;fontSize=12;fontStyle=1;image=https://cdn.jsdelivr.net/gh/devicons/devicon/icons/terraform/terraform-original.svg" value="Terraform" vertex="1">
+          <mxGeometry height="56" width="56" x="560" y="250" as="geometry" />
+        </mxCell>
+        <mxCell id="suggest" parent="1" style="shape=image;html=1;imageAspect=0;aspect=fixed;verticalLabelPosition=bottom;verticalAlign=top;labelBackgroundColor=none;fontSize=12;fontStyle=1;image=https://cdn.jsdelivr.net/gh/devicons/devicon/icons/githubactions/githubactions-original.svg" value="suggest-issues.yml" vertex="1">
+          <mxGeometry height="56" width="56" x="300" y="462" as="geometry" />
+        </mxCell>
+        <mxCell id="implement" parent="1" style="shape=image;html=1;imageAspect=0;aspect=fixed;verticalLabelPosition=bottom;verticalAlign=top;labelBackgroundColor=none;fontSize=12;fontStyle=1;image=https://cdn.jsdelivr.net/gh/devicons/devicon/icons/githubactions/githubactions-original.svg" value="implement-issues.yml" vertex="1">
+          <mxGeometry height="56" width="56" x="560" y="462" as="geometry" />
+        </mxCell>
+        <mxCell id="review" parent="1" style="shape=image;html=1;imageAspect=0;aspect=fixed;verticalLabelPosition=bottom;verticalAlign=top;labelBackgroundColor=none;fontSize=12;fontStyle=1;image=https://cdn.jsdelivr.net/gh/devicons/devicon/icons/githubactions/githubactions-original.svg" value="review-prs.yml" vertex="1">
+          <mxGeometry height="56" width="56" x="300" y="578" as="geometry" />
+        </mxCell>
+        <mxCell id="address" parent="1" style="shape=image;html=1;imageAspect=0;aspect=fixed;verticalLabelPosition=bottom;verticalAlign=top;labelBackgroundColor=none;fontSize=12;fontStyle=1;image=https://cdn.jsdelivr.net/gh/devicons/devicon/icons/githubactions/githubactions-original.svg" value="address-review.yml" vertex="1">
+          <mxGeometry height="56" width="56" x="560" y="578" as="geometry" />
+        </mxCell>
+        <mxCell id="conflicts" parent="1" style="shape=image;html=1;imageAspect=0;aspect=fixed;verticalLabelPosition=bottom;verticalAlign=top;labelBackgroundColor=none;fontSize=12;fontStyle=1;image=https://cdn.jsdelivr.net/gh/devicons/devicon/icons/githubactions/githubactions-original.svg" value="resolve-conflicts.yml" vertex="1">
+          <mxGeometry height="56" width="56" x="300" y="694" as="geometry" />
+        </mxCell>
+        <mxCell id="slackwf" parent="1" style="shape=image;html=1;imageAspect=0;aspect=fixed;verticalLabelPosition=bottom;verticalAlign=top;labelBackgroundColor=none;fontSize=12;fontStyle=1;image=https://cdn.jsdelivr.net/gh/devicons/devicon/icons/githubactions/githubactions-original.svg" value="slack.yml" vertex="1">
+          <mxGeometry height="56" width="56" x="560" y="694" as="geometry" />
+        </mxCell>
+        <mxCell id="github" parent="1" style="shape=image;html=1;imageAspect=0;aspect=fixed;verticalLabelPosition=bottom;verticalAlign=top;labelBackgroundColor=none;fontSize=12;fontStyle=1;image=https://cdn.jsdelivr.net/gh/devicons/devicon/icons/github/github-original.svg" value="GitHub repo&#xa;PRs · issues" vertex="1">
+          <mxGeometry height="64" width="64" x="450" y="880" as="geometry" />
+        </mxCell>
+        <mxCell id="cf" parent="1" style="shape=image;html=1;imageAspect=0;aspect=fixed;verticalLabelPosition=bottom;verticalAlign=top;labelBackgroundColor=none;fontSize=12;fontStyle=1;image=https://cdn.jsdelivr.net/gh/devicons/devicon/icons/cloudflareworkers/cloudflareworkers-original.svg" value="Cloudflare Workers" vertex="1">
+          <mxGeometry height="63" width="63" x="1045" y="331" as="geometry" />
+        </mxCell>
+        <mxCell id="claude" parent="1" style="shape=image;html=1;imageAspect=0;aspect=fixed;verticalLabelPosition=bottom;verticalAlign=top;labelBackgroundColor=none;fontSize=12;fontStyle=1;image=https://unpkg.com/@lobehub/icons-static-svg@1.91.0/icons/claude-color.svg" value="Claude (Anthropic)&#xa;claude-code-action" vertex="1">
+          <mxGeometry height="63" width="63" x="1045" y="650" as="geometry" />
+        </mxCell>
+        <mxCell id="slack" parent="1" style="shape=image;html=1;imageAspect=0;aspect=fixed;verticalLabelPosition=bottom;verticalAlign=top;labelBackgroundColor=none;fontSize=12;fontStyle=1;image=https://cdn.jsdelivr.net/gh/devicons/devicon/icons/slack/slack-original.svg" value="Slack&#xa;#autopilot-status" vertex="1">
+          <mxGeometry height="64" width="64" x="1045" y="783" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="developer" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#5a6c86;fontColor=#33475b;exitX=1;exitY=0.4;entryX=0;entryY=0.5;" target="deploy" value="push to main">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="deploy" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#5a6c86;fontColor=#33475b;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="tf" value="build → terraform apply">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="tf" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#5a6c86;fontColor=#33475b;exitX=1;exitY=0.4;entryX=0;entryY=0.5;" target="cf" value="deploy Worker + cron">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="cf" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#5a6c86;fontColor=#33475b;exitX=0;exitY=0.5;entryX=1;entryY=0.18;exitDx=0;exitDy=0;" target="grpBatch" value="workflow_dispatch&#xa;*/15 + daily">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="suggest" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#82b366;fontColor=#33475b;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="implement" value="workflow_run">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="implement" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#82b366;fontColor=#33475b;exitX=0.25;exitY=1;entryX=0.75;entryY=0;" target="review" value="workflow_run">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="review" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#5a6c86;fontColor=#33475b;strokeColor=#6c8ebf;exitX=1;exitY=0.3;entryX=0;entryY=0.3;" target="address" value="changes requested">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="address" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#5a6c86;fontColor=#33475b;strokeColor=#6c8ebf;exitX=0;exitY=0.75;entryX=1;entryY=0.75;" target="review" value="fixed → re-review">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="grpBatch" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#7a4f9a;fontColor=#4a2f63;strokeColor=#d9770f;fontColor=#a85a00;exitX=1;exitY=0.8;entryX=0;entryY=0.4;" target="claude" value="claude-code-action">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="grpBatch" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#7a4f9a;fontColor=#4a2f63;strokeColor=#555555;fontColor=#333333;exitX=0.45;exitY=1;entryX=0.5;entryY=0;" target="github" value="gh: PRs · issues">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" edge="1" parent="1" source="slackwf" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;labelBackgroundColor=#ffffff;endArrow=block;endFill=1;strokeWidth=1.5;strokeColor=#7a4f9a;fontColor=#4a2f63;exitX=1;exitY=0.5;entryX=0;entryY=0.4;" target="slack" value="chat.postMessage">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
