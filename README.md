@@ -3,7 +3,7 @@
 Life-automation batches: scheduled / manual GitHub Actions that run
 [Claude Code Action](https://github.com/anthropics/claude-code-action)
 
-![workflow-diagram](.github/workflows/github_actions.png)
+![workflow-diagram](.github/workflows/autopilot-architecture.png)
 
 ## Batches
 

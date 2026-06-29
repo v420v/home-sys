@@ -77,3 +77,23 @@ jobs:
       - uses: actions/checkout@v5
       - name: Verify cron schedules are in sync
         run: bash scripts/check-cron-sync.sh
+
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v5
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        working-directory: infra/scheduler
+      - run: npm run build
+        working-directory: infra/scheduler
+      - run: terraform validate
