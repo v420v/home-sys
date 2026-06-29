@@ -70,6 +70,14 @@ jobs:
       - name: Typecheck + build worker (strict tsc)
         run: npm run build
 
+  check-cron-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify cron schedules are in sync
+        run: bash scripts/check-cron-sync.sh
+
   terraform:
     runs-on: ubuntu-latest
     timeout-minutes: 5
