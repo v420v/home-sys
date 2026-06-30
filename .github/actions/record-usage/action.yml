@@ -72,7 +72,7 @@ runs:
         set -uo pipefail
         warn() { echo "::warning title=record-usage::$*"; }
         summary() { echo "$*" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"; }
-        num() { case "$1" in ''|*[!0-9.]*) echo 0;; *) echo "$1";; esac; }   # JSON-number or 0
+        num() { case "$1" in ''|*[!0-9eE.+-]*) echo 0;; *) echo "$1";; esac; }  # JSON-number or 0 (accepts scientific notation)
         RUN_URL="${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}"
         # GITHUB_WORKFLOW_REF is like `owner/repo/.github/workflows/x.yml@refs/heads/main`.
         WF_REF="${GITHUB_WORKFLOW_REF%@*}"; WF_FILE="${WF_REF##*/}"; WF_FILE="${WF_FILE:-unknown.yml}"
