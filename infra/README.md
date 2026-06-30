@@ -15,7 +15,7 @@ remain.
 | Cron (UTC) | Dispatches |
 | --- | --- |
 | `*/15 * * * *` | resolve-conflicts, review-prs, address-review, slack |
-| `0 18 * * *` (03:00 JST) | suggest-issues → chains to implement → review → address |
+| `0 18 * * *` (03:00 JST) | suggest-issues → chains to implement → review → address; usage-report (daily cost digest) |
 
 ## Layout
 

@@ -1,0 +1,212 @@
+name: Record Claude usage
+description: >
+  Best-effort capture of one Claude Code Action run's token/cost usage into the
+  `usage-ledger` branch, plus immediate Slack alerts for the two events that mean
+  real money or a hard stop: an API-key billing path (A2) and a Max usage-limit
+  hit (A3). NEVER fails the calling job — recording/alerting errors only warn.
+
+# How it works: claude-code-action@v1 writes an `execution_file` (a JSON array of
+# Claude Agent SDK messages). Its final `result` entry carries `usage` (token
+# buckets), `modelUsage` (per-model cost/tokens), `total_cost_usd` (a CLIENT-SIDE
+# estimate from a bundled price table — a cost-EQUIVALENT, not a real bill on a Max
+# subscription), `num_turns`, `is_error`, and `subtype`. We parse that, write one
+# unique JSON file per run to the ledger branch, and alert on A2/A3.
+
+inputs:
+  execution_file:
+    description: Path from the claude-code-action `execution_file` output. May be empty if the step crashed.
+    required: false
+    default: ""
+  model:
+    description: The model passed to claude (e.g. `opus`, `sonnet`) — a label for the record.
+    required: false
+    default: ""
+  target:
+    description: Optional label for the matrix item this run handled (e.g. `owner/repo#42`).
+    required: false
+    default: ""
+  claude_outcome:
+    description: The `steps.<id>.outcome` of the claude step (success/failure) — helps record crashes with no execution_file.
+    required: false
+    default: ""
+  ledger_branch:
+    description: Orphan branch that stores the usage ledger.
+    required: false
+    default: usage-ledger
+  gh_token:
+    description: PAT with contents write scope on this repo (reuse the repo's GH_TOKEN).
+    required: true
+  slack_bot_token:
+    description: Slack bot token (chat:write). If empty, alerts are skipped.
+    required: false
+    default: ""
+  alert_channel:
+    description: Slack channel id for #autopilot-alerts. If empty, alerts are skipped.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Record usage and raise billing/limit alerts
+      shell: bash
+      env:
+        # GitHub context (composite actions don't expand ${{ github.* }} inside run:).
+        REPO: ${{ github.repository }}
+        WORKFLOW: ${{ github.workflow }}
+        RUN_ID: ${{ github.run_id }}
+        RUN_ATTEMPT: ${{ github.run_attempt }}
+        SERVER_URL: ${{ github.server_url }}
+        # Inputs.
+        EXEC_FILE: ${{ inputs.execution_file }}
+        MODEL_ARG: ${{ inputs.model }}
+        TARGET: ${{ inputs.target }}
+        CLAUDE_OUTCOME: ${{ inputs.claude_outcome }}
+        BRANCH: ${{ inputs.ledger_branch }}
+        GH_TOKEN: ${{ inputs.gh_token }}
+        SLACK_BOT_TOKEN: ${{ inputs.slack_bot_token }}
+        ALERT_CHANNEL: ${{ inputs.alert_channel }}
+        # ANTHROPIC_API_KEY is inherited from the job env if present (the A2 signal).
+      run: |
+        # Best-effort throughout: this MUST NOT fail the automation. No `set -e`.
+        set -uo pipefail
+        warn() { echo "::warning title=record-usage::$*"; }
+        summary() { echo "$*" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"; }
+        num() { case "$1" in ''|*[!0-9.]*) echo 0;; *) echo "$1";; esac; }   # JSON-number or 0
+        RUN_URL="${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}"
+        # GITHUB_WORKFLOW_REF is like `owner/repo/.github/workflows/x.yml@refs/heads/main`.
+        WF_REF="${GITHUB_WORKFLOW_REF%@*}"; WF_FILE="${WF_REF##*/}"; WF_FILE="${WF_FILE:-unknown.yml}"
+
+        # --- A2: which auth path would this run bill through? -----------------------------
+        # On a Max subscription the OAuth token draws from your plan with no monetary
+        # overage. If ANTHROPIC_API_KEY is also set, runs can bill at API rates instead
+        # (claude-code #43333) — that is real money. Flag it.
+        AUTH_MODE=subscription
+        [ -n "${ANTHROPIC_API_KEY:-}" ] && AUTH_MODE=api_key
+
+        # --- Parse the execution file (token/cost truth) ---------------------------------
+        INPUT=0; OUTPUT=0; CC=0; CR=0; COST=0; TURNS=0; DUR=0
+        ISERR=true; SUBTYPE=no_result; MODELUSAGE='{}'; RESULT_TEXT=""
+        if [ -n "$EXEC_FILE" ] && [ -f "$EXEC_FILE" ]; then
+          # The file is a JSON array; take the last `result` entry (guard against trailing entries).
+          RES=$(jq -c '[.[] | select(.type=="result")] | last // empty' "$EXEC_FILE" 2>/dev/null || true)
+          if [ -n "$RES" ]; then
+            INPUT=$(num "$(jq -r '.usage.input_tokens // 0' <<<"$RES")")
+            OUTPUT=$(num "$(jq -r '.usage.output_tokens // 0' <<<"$RES")")
+            CC=$(num "$(jq -r '.usage.cache_creation_input_tokens // 0' <<<"$RES")")
+            CR=$(num "$(jq -r '.usage.cache_read_input_tokens // 0' <<<"$RES")")
+            COST=$(num "$(jq -r '.total_cost_usd // 0' <<<"$RES")")
+            TURNS=$(num "$(jq -r '.num_turns // 0' <<<"$RES")")
+            DUR=$(num "$(jq -r '.duration_ms // 0' <<<"$RES")")
+            ISERR=$(jq -r 'if .is_error == true then "true" else "false" end' <<<"$RES")
+            SUBTYPE=$(jq -r '.subtype // "unknown"' <<<"$RES")
+            MODELUSAGE=$(jq -c '.modelUsage // {}' <<<"$RES")
+            RESULT_TEXT=$(jq -r '.result // ""' <<<"$RES")
+          fi
+        elif [ "$CLAUDE_OUTCOME" = "success" ]; then
+          # Step succeeded but no file we can read — record a thin success row.
+          ISERR=false; SUBTYPE=no_execution_file
+        fi
+
+        # --- A3: did this run hit the Max usage limit? -----------------------------------
+        # Signals (confirmed): "usage limit reached" / "You've hit your (session|weekly|
+        # Opus) limit". The legacy machine form is "...reached|<unix-epoch>" (reset time).
+        LIMIT_HIT=false; RESET_JSON=null
+        LIMIT_RE='usage limit reached|hit your (session|weekly|opus) limit'
+        if grep -iqE "$LIMIT_RE" <<<"$RESULT_TEXT" 2>/dev/null \
+           || { [ -n "$EXEC_FILE" ] && [ -f "$EXEC_FILE" ] && grep -iqE "$LIMIT_RE" "$EXEC_FILE" 2>/dev/null; }; then
+          LIMIT_HIT=true
+          EPOCH=$(grep -oiE 'usage limit reached\|[0-9]+' "$EXEC_FILE" 2>/dev/null | grep -oE '[0-9]+' | head -1 || true)
+          [ -n "${EPOCH:-}" ] && RESET_JSON="$EPOCH"
+        fi
+
+        # --- Build the record ------------------------------------------------------------
+        TS=$(date -u +%FT%TZ); DATE=$(date -u +%F)
+        REC=$(jq -nc \
+          --arg ts "$TS" --arg date "$DATE" --arg repo "$REPO" \
+          --arg workflow "$WORKFLOW" --arg wf "$WF_FILE" \
+          --arg run_id "$RUN_ID" --arg run_attempt "$RUN_ATTEMPT" --arg run_url "$RUN_URL" \
+          --arg target "$TARGET" --arg model_arg "$MODEL_ARG" --arg auth_mode "$AUTH_MODE" \
+          --argjson input "$INPUT" --argjson output "$OUTPUT" --argjson cc "$CC" --argjson cr "$CR" \
+          --argjson cost "$COST" --argjson turns "$TURNS" --argjson dur "$DUR" \
+          --argjson is_error "$ISERR" --arg subtype "$SUBTYPE" \
+          --argjson model_usage "$MODELUSAGE" \
+          --argjson limit_hit "$LIMIT_HIT" --argjson reset "$RESET_JSON" '
+          {ts:$ts, date:$date, repo:$repo, workflow:$workflow, workflow_file:$wf,
+           run_id:$run_id, run_attempt:$run_attempt, run_url:$run_url, target:$target,
+           model_arg:$model_arg, auth_mode:$auth_mode,
+           usage:{input_tokens:$input, output_tokens:$output,
+                  cache_creation_input_tokens:$cc, cache_read_input_tokens:$cr},
+           total_cost_usd:$cost, num_turns:$turns, duration_ms:$dur,
+           is_error:$is_error, subtype:$subtype, model_usage:$model_usage,
+           limit_hit:$limit_hit, limit_reset_epoch:$reset}' 2>/dev/null) || {
+          warn "could not build usage record; skipping"; REC=""; }
+
+        # --- Append to the ledger branch (unique file per run; no content conflicts) ------
+        if [ -n "$REC" ]; then
+          TMP=$(mktemp -d)
+          AUTH_URL="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          REL="usage/$(date -u +%Y/%m/%d)/${RUN_ID}-${RUN_ATTEMPT}-${RANDOM}${RANDOM}.json"
+          (
+            set -uo pipefail
+            git init -q "$TMP"
+            git -C "$TMP" config user.name "claude[bot]"
+            git -C "$TMP" config user.email "claude[bot]@users.noreply.github.com"
+            git -C "$TMP" remote add origin "$AUTH_URL"
+            if git -C "$TMP" fetch -q --depth 50 origin "$BRANCH" 2>/dev/null; then
+              git -C "$TMP" checkout -q -B "$BRANCH" FETCH_HEAD
+            else
+              git -C "$TMP" checkout -q --orphan "$BRANCH"   # first run bootstraps it
+            fi
+            mkdir -p "$TMP/$(dirname "$REL")"
+            printf '%s\n' "$REC" > "$TMP/$REL"
+            git -C "$TMP" add -A
+            git -C "$TMP" commit -q -m "usage: ${RUN_ID} ${REL}"
+            ok=0
+            for attempt in 1 2 3 4 5; do
+              if git -C "$TMP" push -q origin "HEAD:$BRANCH" 2>/dev/null; then ok=1; break; fi
+              git -C "$TMP" fetch -q --depth 50 origin "$BRANCH" 2>/dev/null \
+                && git -C "$TMP" rebase -q FETCH_HEAD 2>/dev/null \
+                || git -C "$TMP" rebase --abort 2>/dev/null || true
+              sleep $(( (RANDOM % 5) + attempt ))
+            done
+            [ "$ok" = 1 ] || { echo "push failed after retries"; exit 1; }
+          ) || warn "failed to append usage record to $BRANCH (recording is best-effort)"
+          rm -rf "$TMP"
+        fi
+
+        # --- Slack alerts: A2 (billing path) and A3 (limit hit) --------------------------
+        post_alert() { # $1=header text  $2=body mrkdwn
+          [ -z "$SLACK_BOT_TOKEN" ] || [ -z "$ALERT_CHANNEL" ] && { warn "no Slack creds; alert not sent: $1"; return; }
+          local payload
+          payload=$(jq -nc --arg ch "$ALERT_CHANNEL" --arg hdr "$1" --arg body "$2" --arg url "$RUN_URL" \
+            '{channel:$ch, text:$hdr,
+              blocks:[{type:"header", text:{type:"plain_text", text:$hdr, emoji:true}},
+                      {type:"section", text:{type:"mrkdwn", text:$body}},
+                      {type:"context", elements:[{type:"mrkdwn", text:("<"+$url+"|run logs>")}]}]}')
+          local resp
+          resp=$(curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H 'Content-type: application/json; charset=utf-8' --data "$payload" 2>/dev/null || echo '{}')
+          [ "$(jq -r '.ok // false' <<<"$resp")" = "true" ] || warn "Slack alert failed: $(jq -r '.error // "unknown"' <<<"$resp")"
+        }
+
+        if [ "$AUTH_MODE" = "api_key" ]; then
+          post_alert "🚨 課金リスク: APIキー経路で実行 (${WORKFLOW})" \
+            "*ANTHROPIC_API_KEY が設定されています。* Maxサブスクではなく *API従量課金* される可能性があります (claude-code #43333)。このワークフローからキーを外し、\`CLAUDE_CODE_OAUTH_TOKEN\` のみで実行してください。"
+        fi
+
+        if [ "$LIMIT_HIT" = "true" ]; then
+          WHEN="(reset time unknown)"
+          if [ "$RESET_JSON" != "null" ]; then
+            WHEN=$(TZ=Asia/Tokyo date -d "@$RESET_JSON" '+%Y-%m-%d %H:%M JST' 2>/dev/null \
+                  || TZ=Asia/Tokyo date -r "$RESET_JSON" '+%Y-%m-%d %H:%M JST' 2>/dev/null || echo "$RESET_JSON")
+          fi
+          post_alert "⛔ Max利用上限に到達 (${WORKFLOW})" \
+            "Claude の利用上限に達し、このrunはブロックされました。リセット見込み: *${WHEN}*。上限超過時に *extra usage* が有効だと課金が発生し得ます。対象: ${TARGET:-—}"
+        fi
+
+        # --- Step summary ----------------------------------------------------------------
+        summary "### 💸 usage — ${WORKFLOW}"
+        summary "tokens in/out ${INPUT}/${OUTPUT} · cache ${CC}/${CR} · ~\$$(printf '%.4f' "$COST" 2>/dev/null || echo "$COST") (API換算) · turns ${TURNS} · auth ${AUTH_MODE} · limit_hit ${LIMIT_HIT}"
+        exit 0

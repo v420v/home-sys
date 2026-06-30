@@ -39,8 +39,10 @@ const SCHEDULES: Readonly<Record<string, readonly string[]>> = {
     "address-review.yml",
     "slack.yml",
   ],
-  // 18:00 UTC = 03:00 JST daily: kicks the suggest -> implement -> review chain.
-  "0 18 * * *": ["suggest-issues.yml"],
+  // 18:00 UTC = 03:00 JST daily: kicks the suggest -> implement -> review chain, and
+  // dispatches the AI-free usage digest (it reports the trailing 24h/7d, so running it
+  // alongside the nightly kickoff is fine — the night's spend lands in tomorrow's report).
+  "0 18 * * *": ["suggest-issues.yml", "usage-report.yml"],
 };
 
 /** Collapse whitespace so a lookup is robust to any cron normalization. */

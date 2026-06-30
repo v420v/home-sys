@@ -37,6 +37,7 @@ jobs:
 
       - name: Suggest improvement issues with Claude
         uses: anthropics/claude-code-action@v1
+        id: claude
         env:
           # PAT with `repo` scope: used by gh to read your stars/repos/issues AND to
           # create issues cross-repo. gh reads GH_TOKEN directly.
@@ -130,3 +131,16 @@ jobs:
             `gh issue create`). End with run totals. Keep it high level: do NOT paste repo
             file contents. **If you created zero issues, state explicitly WHY for each repo**
             (e.g. "all proposals duplicated existing issues", "issues disabled", or the exact error).
+
+      # Capture this run's token/cost usage into the usage-ledger branch (best-effort;
+      # never fails the job) and raise billing/limit alerts. See .github/actions/record-usage.
+      - name: Record Claude usage
+        if: always()
+        uses: ./.github/actions/record-usage
+        with:
+          execution_file: ${{ steps.claude.outputs.execution_file }}
+          claude_outcome: ${{ steps.claude.outcome }}
+          model: opus
+          gh_token: ${{ secrets.GH_TOKEN }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+          alert_channel: ${{ vars.SLACK_ALERT_CHANNEL_ID }}

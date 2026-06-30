@@ -1,0 +1,195 @@
+name: Usage Report
+
+# Daily Claude cost/usage digest for the autopilot workflows. A cheap, AI-free workflow
+# (it NEVER runs Claude). It reads the per-run records the `record-usage` composite action
+# writes to the `usage-ledger` branch, aggregates the last 24h and 7d (tokens, API-equivalent
+# cost, per-workflow and per-model breakdown), and posts a digest to #autopilot-reports.
+#
+# IMPORTANT framing: this is a Claude MAX subscription (CLAUDE_CODE_OAUTH_TOKEN) — you are NOT
+# billed per token. The dollar figures are a COST-EQUIVALENT (what the same tokens would cost
+# at API list prices), useful as a budget yardstick and for spotting trends/anomalies. The real
+# constraint is your Max usage limit (5h + weekly windows), which is not dollar-denominated and
+# is only observable reactively (a run failing with "usage limit reached" → see record-usage).
+#
+# REPORT vs ALERT split: this workflow is the quiet, scheduled REPORT side. The loud, edge-driven
+# ALERT side (billing-path / limit-hit) lives in .github/actions/record-usage. The one alert this
+# report raises is the self-imposed budget ceiling (A5): if 7d cost-equivalent crosses
+# USAGE_ALERT_CRIT_PCT of USAGE_WEEKLY_BUDGET_USD, it cross-posts to #autopilot-alerts.
+#
+# Triggers: dispatched daily at 18:00 UTC (03:00 JST) by the Cloudflare scheduler + manual.
+#
+# Setup (Settings → Secrets and variables → Actions):
+#   secret   SLACK_BOT_TOKEN          = xoxb-…  (reused from the status board)
+#   variable SLACK_REPORT_CHANNEL_ID  = C…      (#autopilot-reports)
+#   variable SLACK_ALERT_CHANNEL_ID   = C…      (#autopilot-alerts; used for the budget alert)
+#   variable USAGE_WEEKLY_BUDGET_USD  = e.g. 50   (cost-equivalent budget; empty/0 disables the bar)
+#   variable USAGE_ALERT_WARN_PCT     = 80         (optional; default 80)
+#   variable USAGE_ALERT_CRIT_PCT     = 100        (optional; default 100)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read # all GitHub/Slack calls use the PAT + bot token below
+
+concurrency:
+  group: usage-report
+  cancel-in-progress: true
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      REPO: ${{ github.repository }}
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      REPORT_CHANNEL: ${{ vars.SLACK_REPORT_CHANNEL_ID }}
+      ALERT_CHANNEL: ${{ vars.SLACK_ALERT_CHANNEL_ID }}
+      BUDGET_USD: ${{ vars.USAGE_WEEKLY_BUDGET_USD }}
+      WARN_PCT: ${{ vars.USAGE_ALERT_WARN_PCT }}
+      CRIT_PCT: ${{ vars.USAGE_ALERT_CRIT_PCT }}
+      LEDGER_BRANCH: usage-ledger
+    steps:
+      - name: Build and post the usage digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${SLACK_BOT_TOKEN:?SLACK_BOT_TOKEN secret is not set}"
+          : "${REPORT_CHANNEL:?SLACK_REPORT_CHANNEL_ID variable is not set}"
+          WARN_PCT="${WARN_PCT:-80}"; CRIT_PCT="${CRIT_PCT:-100}"
+          slack() { curl -sS -X POST "https://slack.com/api/$1" \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H 'Content-type: application/json; charset=utf-8' --data "$2"; }
+          post() { # $1=channel $2=payload-without-channel
+            local resp; resp=$(slack chat.postMessage "$(jq -c --arg ch "$1" '. + {channel:$ch}' <<<"$2")")
+            [ "$(jq -r '.ok' <<<"$resp")" = "true" ] || { echo "post to $1 failed: $(jq -r '.error' <<<"$resp")"; echo "$resp"; }; }
+
+          # --- fetch the ledger -----------------------------------------------------------
+          TMP=$(mktemp -d)
+          if ! git clone -q --depth 200 --single-branch --branch "$LEDGER_BRANCH" \
+                "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "$TMP" 2>/dev/null; then
+            echo "No $LEDGER_BRANCH branch yet — nothing to report."
+            payload=$(jq -n '{text:"🧾 Autopilot Usage — まだ記録がありません（usage-ledger 未作成）。",
+              blocks:[{type:"section",text:{type:"mrkdwn",text:"🧾 *Autopilot Usage* — まだ記録がありません（`usage-ledger` ブランチ未作成）。Claude を使うワークフローが1回走れば集計が始まります。"}}]}')
+            post "$REPORT_CHANNEL" "$payload"
+            exit 0
+          fi
+
+          # --- gather candidate record files (last ~9 UTC days cover both windows) --------
+          files=()
+          for d in $(seq 0 9); do
+            dir="$TMP/usage/$(date -u -d "-$d day" +%Y/%m/%d)"
+            [ -d "$dir" ] && while IFS= read -r p; do files+=("$p"); done < <(find "$dir" -maxdepth 1 -name '*.json' 2>/dev/null)
+          done
+          if [ "${#files[@]}" -eq 0 ]; then
+            payload=$(jq -n '{text:"🧾 Autopilot Usage — 直近の記録なし。",
+              blocks:[{type:"section",text:{type:"mrkdwn",text:"🧾 *Autopilot Usage* — 直近9日に記録がありません。"}}]}')
+            post "$REPORT_CHANNEL" "$payload"
+            exit 0
+          fi
+
+          SINCE_24=$(date -u -d '-24 hours' +%FT%TZ)
+          SINCE_7=$(date -u -d '-7 days' +%FT%TZ)
+
+          # --- aggregate (one jq pass over all records) -----------------------------------
+          # Emits {d:{...},w:{...}} where each window has totals, byWorkflow, byModel.
+          AGG=$(jq -s --arg s24 "$SINCE_24" --arg s7 "$SINCE_7" '
+            def tally:
+              reduce .[] as $r (
+                {cost:0,inp:0,out:0,cc:0,cr:0,runs:0,errors:0,limit:0,apikey:0,wf:{},model:{}};
+                .cost   += ($r.total_cost_usd // 0)
+                | .inp  += ($r.usage.input_tokens // 0)
+                | .out  += ($r.usage.output_tokens // 0)
+                | .cc   += ($r.usage.cache_creation_input_tokens // 0)
+                | .cr   += ($r.usage.cache_read_input_tokens // 0)
+                | .runs += 1
+                | .errors += (if $r.is_error then 1 else 0 end)
+                | .limit  += (if $r.limit_hit then 1 else 0 end)
+                | .apikey += (if $r.auth_mode == "api_key" then 1 else 0 end)
+                | .wf[$r.workflow_file] = ((.wf[$r.workflow_file] // {cost:0,runs:0,errors:0})
+                    | .cost += ($r.total_cost_usd // 0) | .runs += 1
+                    | .errors += (if $r.is_error then 1 else 0 end))
+                | reduce (($r.model_usage // {}) | to_entries[]) as $m (.;
+                    .model[$m.key] = ((.model[$m.key] // {cost:0,inp:0,out:0})
+                      | .cost += ($m.value.costUSD // 0)
+                      | .inp  += ($m.value.inputTokens // 0)
+                      | .out  += ($m.value.outputTokens // 0))) );
+            map(select(.ts >= $s7)) as $w7 |
+            ($w7 | map(select(.ts >= $s24))) as $w24 |
+            {d:($w24|tally), w:($w7|tally)}' "${files[@]}")
+
+          # --- helpers to format --------------------------------------------------------
+          usd() { printf '$%.2f' "$1" 2>/dev/null || echo "\$$1"; }
+          ktok() { awk -v n="$1" 'BEGIN{ if(n>=1e6) printf "%.1fM", n/1e6; else if(n>=1e3) printf "%.1fk", n/1e3; else printf "%d", n }'; }
+
+          D_COST=$(jq -r '.d.cost' <<<"$AGG"); W_COST=$(jq -r '.w.cost' <<<"$AGG")
+          D_RUNS=$(jq -r '.d.runs' <<<"$AGG"); D_ERR=$(jq -r '.d.errors' <<<"$AGG")
+          D_IN=$(jq -r '.d.inp' <<<"$AGG"); D_OUT=$(jq -r '.d.out' <<<"$AGG")
+          D_CC=$(jq -r '.d.cc' <<<"$AGG"); D_CR=$(jq -r '.d.cr' <<<"$AGG")
+          W_LIMIT=$(jq -r '.w.limit' <<<"$AGG"); W_APIKEY=$(jq -r '.w.apikey' <<<"$AGG")
+
+          # by-workflow (24h), sorted by cost desc
+          WF_LINES=$(jq -r '.d.wf | to_entries
+            | sort_by(-.value.cost)
+            | map("• `\(.key)` — \(.value.runs) run · $\(.value.cost*100|round/100)\(if .value.errors>0 then " · ❌\(.value.errors)" else "" end)")
+            | join("\n") // "（なし）"' <<<"$AGG")
+          [ -z "$WF_LINES" ] && WF_LINES="（24hの記録なし）"
+          # by-model (7d), sorted by cost desc
+          MODEL_LINES=$(jq -r '.w.model | to_entries
+            | sort_by(-.value.cost)
+            | map("• \(.key) — $\(.value.cost*100|round/100) · in \(.value.inp) / out \(.value.out) tok")
+            | join("\n") // "（なし）"' <<<"$AGG")
+          [ -z "$MODEL_LINES" ] && MODEL_LINES="（7dの記録なし）"
+
+          # budget bar (7d cost-equivalent vs weekly budget)
+          BUDGET_LINE="予算: 未設定（\`USAGE_WEEKLY_BUDGET_USD\` を設定すると消化率を表示）"
+          PCT=0
+          if [ -n "${BUDGET_USD:-}" ] && awk "BEGIN{exit !($BUDGET_USD>0)}"; then
+            PCT=$(awk -v c="$W_COST" -v b="$BUDGET_USD" 'BEGIN{printf "%.0f", (c/b)*100}')
+            FILLED=$(awk -v p="$PCT" 'BEGIN{n=int(p/10); if(n>10)n=10; if(n<0)n=0; print n}')
+            BAR=""   # arithmetic loop (no seq) renders an empty/full bar correctly
+            for ((_i = 0; _i < FILLED; _i++)); do BAR="${BAR}█"; done
+            for ((_i = 0; _i < 10 - FILLED; _i++)); do BAR="${BAR}░"; done
+            MARK="🟢"; awk "BEGIN{exit !($PCT>=$WARN_PCT)}" && MARK="🟡"; awk "BEGIN{exit !($PCT>=$CRIT_PCT)}" && MARK="🔴"
+            BUDGET_LINE="${MARK} 週次予算消化（API換算）: ${BAR} *${PCT}%* （$(usd "$W_COST") / \$${BUDGET_USD}）"
+          fi
+
+          NOW=$(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M JST')
+          DOW=$(TZ=Asia/Tokyo date '+%u')
+          TITLE="🧾 Autopilot Usage — 日次"; [ "$DOW" = "1" ] && TITLE="🧾 Autopilot Usage — 日次 / 📅 週次サマリ"
+
+          HEADLINE="*24h:* $(usd "$D_COST")（API換算） · ${D_RUNS} run · in $(ktok "$D_IN") / out $(ktok "$D_OUT") tok · cache $(ktok "$D_CC")/$(ktok "$D_CR")"
+          [ "$D_ERR" -gt 0 ] && HEADLINE="${HEADLINE} · ❌${D_ERR}失敗"
+          WEEKLINE="*7d:* $(usd "$W_COST")（API換算）"
+          [ "$W_LIMIT" -gt 0 ] && WEEKLINE="${WEEKLINE} · ⛔上限到達 ${W_LIMIT}件"
+          [ "$W_APIKEY" -gt 0 ] && WEEKLINE="${WEEKLINE} · 🚨APIキー経路 ${W_APIKEY}件"
+
+          NOTE="_数値はAPI換算の推定額（Maxサブスクは実請求ではありません）。真の制約はMax利用上限です。_"
+
+          blocks=$(jq -n \
+            --arg title "$TITLE" --arg head "$HEADLINE" --arg week "$WEEKLINE" \
+            --arg budget "$BUDGET_LINE" --arg wf "$WF_LINES" --arg model "$MODEL_LINES" \
+            --arg note "$NOTE" --arg upd "updated $NOW" '
+            [ {type:"header", text:{type:"plain_text", text:$title, emoji:true}},
+              {type:"section", text:{type:"mrkdwn", text:($head+"\n"+$week)}},
+              {type:"section", text:{type:"mrkdwn", text:$budget}},
+              {type:"section", text:{type:"mrkdwn", text:("*ワークフロー別 (24h)*\n"+$wf)}},
+              {type:"section", text:{type:"mrkdwn", text:("*モデル別 (7d)*\n"+$model)}},
+              {type:"context", elements:[{type:"mrkdwn", text:$note}]},
+              {type:"context", elements:[{type:"mrkdwn", text:$upd}]} ]')
+          payload=$(jq -nc --arg text "Autopilot Usage digest" --argjson blocks "$blocks" '{text:$text, blocks:$blocks}')
+          post "$REPORT_CHANNEL" "$payload"
+          echo "Posted usage digest (24h $(usd "$D_COST"), 7d $(usd "$W_COST"))."
+
+          # --- A5: budget-ceiling alert (cross-post to #autopilot-alerts) -----------------
+          if [ -n "${ALERT_CHANNEL:-}" ] && awk "BEGIN{exit !($PCT>=$CRIT_PCT && $PCT>0)}"; then
+            apayload=$(jq -nc --arg t "💸 週次予算を超過（API換算 ${PCT}%）" \
+              --arg b "*7d cost-equivalent $(usd "$W_COST") / \$${BUDGET_USD}（${PCT}%）。* 自己設定の予算上限を超えました。Maxの実利用上限とは別物ですが、消費ペースの見直し時です（モデルをopus→sonnet、頻度/max-turns、対象数の調整など）。" '
+              {text:$t, blocks:[{type:"header",text:{type:"plain_text",text:$t,emoji:true}},
+                                {type:"section",text:{type:"mrkdwn",text:$b}}]}')
+            post "$ALERT_CHANNEL" "$apayload"
+            echo "Budget CRIT alert cross-posted."
+          fi
+
+          echo "### Usage Report — 24h $(usd "$D_COST") / 7d $(usd "$W_COST") (API換算)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"

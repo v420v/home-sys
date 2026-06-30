@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "Skill(deep-research)",
+      "Skill(deep-research:*)",
+      "WebSearch",
+      "Bash(gh issue *)",
+      "WebFetch(domain:docs.claude.com)",
+      "Bash(curl -sL \"https://api.github.com/repos/anthropics/claude-code/issues/12829\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('TITLE:',d.get\\('title'\\)\\); print\\('STATE:',d.get\\('state'\\)\\); print\\('CREATED:',d.get\\('created_at'\\)\\); print\\('USER:',d.get\\('user',{}\\).get\\('login'\\)\\); print\\('---BODY---'\\); print\\(\\(d.get\\('body'\\) or ''\\)[:6000]\\)\")",
+      "Bash(curl -sL \"https://api.github.com/repos/anthropics/claude-code/issues/50518\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('TITLE:',d.get\\('title'\\)\\); print\\('STATE:',d.get\\('state'\\)\\); print\\('CREATED:',d.get\\('created_at'\\)\\); print\\('USER:',d.get\\('user',{}\\).get\\('login'\\)\\); print\\('---BODY---'\\); print\\(\\(d.get\\('body'\\) or ''\\)[:4000]\\)\")",
+      "WebFetch(domain:support.claude.com)",
+      "Bash(curl -sL \"https://api.github.com/repos/anthropics/claude-code/issues/33820\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('TITLE:',d.get\\('title'\\)\\); print\\('CREATED:',d.get\\('created_at'\\)\\); print\\('USER:',d.get\\('user',{}\\).get\\('login'\\)\\); print\\(\\(d.get\\('body'\\) or ''\\)[:2500]\\)\")",
+      "Bash(curl -sL \"https://api.github.com/search/code?q=anthropic-ratelimit-unified-status+repo:anthropics/claude-code\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('total:', d.get\\('total_count'\\)\\); [print\\(i['path']\\) for i in d.get\\('items',[]\\)[:10]]\")",
+      "Bash(curl -sL -H \"Accept: application/vnd.github+json\" \"https://api.github.com/search/code?q=anthropic-ratelimit-unified\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('total:', d.get\\('total_count'\\)\\); print\\('msg:', d.get\\('message',''\\)\\)\")",
+      "Bash(curl -sL \"https://api.github.com/search/issues?q=allowed_warning+org:anthropics\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('total:', d.get\\('total_count'\\),'msg:',d.get\\('message',''\\)\\); [print\\(i['number'], i['title'], '|', i['html_url']\\) for i in d.get\\('items',[]\\)[:8]]\")",
+      "Bash(curl -sL \"https://api.github.com/search/issues?q=%22anthropic-ratelimit-unified-status%22+org:anthropics\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('total:', d.get\\('total_count'\\),'msg:',d.get\\('message',''\\)\\); [print\\(i['number'], '|', i['title'], '|', i['created_at']\\) for i in d.get\\('items',[]\\)[:10]]\")",
+      "Bash(curl -sL \"https://api.github.com/repos/anthropics/claude-agent-sdk-python/pulls/648\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('TITLE:',d.get\\('title'\\)\\); print\\('MERGED:',d.get\\('merged_at'\\)\\); print\\('USER:',d.get\\('user',{}\\).get\\('login'\\)\\); print\\(\\(d.get\\('body'\\) or ''\\)[:2500]\\)\")",
+      "Bash(curl -sL \"https://api.github.com/repos/anthropics/claude-code/issues/41185\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('TITLE:',d.get\\('title'\\)\\); print\\('CREATED:',d.get\\('created_at'\\)\\); print\\('USER:',d.get\\('user',{}\\).get\\('login'\\)\\); print\\(\\(d.get\\('body'\\) or ''\\)[:3000]\\)\")",
+      "Bash(curl -sL \"https://api.github.com/repos/anthropics/claude-code/issues/55333\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('TITLE:',d.get\\('title'\\)\\); print\\('CREATED:',d.get\\('created_at'\\)\\); print\\('USER:',d.get\\('user',{}\\).get\\('login'\\)\\); print\\(\\(d.get\\('body'\\) or ''\\)[:2000]\\)\")",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/anthropics/claude-agent-sdk-python/main/src/claude_agent_sdk/types.py\")",
+      "Read(//private/tmp/ycheck/**)",
+      "Bash(sed 's/--severity=warning/--severity=style/' sc.js)",
+      "Bash(node sc_style.js)"
+    ]
+  }
+}

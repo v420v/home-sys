@@ -121,6 +121,7 @@ jobs:
 
       - name: Implement ${{ matrix.repo }}#${{ matrix.number }}
         uses: anthropics/claude-code-action@v1
+        id: claude
         env:
           # PAT with `repo` + `workflow` scope: clone, push the branch, open the PR, comment.
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
@@ -187,3 +188,17 @@ jobs:
 
             If a required step (clone / push / PR) fails, append the exact error to
             `$GITHUB_STEP_SUMMARY` and exit non-zero so this job is marked failed.
+
+      # Capture this run's token/cost usage into the usage-ledger branch (best-effort;
+      # never fails the job) and raise billing/limit alerts. See .github/actions/record-usage.
+      - name: Record Claude usage
+        if: always()
+        uses: ./.github/actions/record-usage
+        with:
+          execution_file: ${{ steps.claude.outputs.execution_file }}
+          claude_outcome: ${{ steps.claude.outcome }}
+          model: sonnet
+          target: ${{ matrix.repo }}#${{ matrix.number }}
+          gh_token: ${{ secrets.GH_TOKEN }}
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+          alert_channel: ${{ vars.SLACK_ALERT_CHANNEL_ID }}
