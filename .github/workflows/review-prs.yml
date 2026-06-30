@@ -43,14 +43,18 @@ on:
         description: "Max automated review rounds per PR before escalating to you"
         type: string
         default: "3"
+      force:
+        description: "Force this run even if another is already active (bypass overlap guard)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 # No `concurrency` group on purpose. A group with cancel-in-progress:false would QUEUE a
-# scheduled tick that arrives mid-run and run it right after — but we want such ticks
+# scheduler tick that arrives mid-run and run it right after — but we want such ticks
 # SKIPPED. Overlap is instead prevented by the skip-guard at the top of `discover` below
-# (it drops the run when an older run of this workflow is still active).
+# (it drops the run when an older run is still active, unless `force` input is true).
 
 jobs:
   # ---- 1. Pick PRs that need a (re)review (deterministic; no AI, no model cost) ---------
@@ -79,9 +83,10 @@ jobs:
           set +e   # a single PR hiccup must not abort discovery
 
           # Skip-guard: if another (older) run of THIS workflow is still active, drop this run
-          # so scheduled ticks never overlap (manual dispatch always proceeds). Run ids increase
-          # monotonically, so we yield only to an OLDER run — if two ever race, exactly one wins.
-          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
+          # so scheduler ticks (and chained workflow_run triggers) never overlap. Set `force`
+          # input to bypass for human re-runs. Run ids increase monotonically, so we yield only
+          # to an OLDER run — if two ever race, exactly one wins.
+          if [ "${{ inputs.force }}" != "true" ]; then
             active=$(gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/review-prs.yml/runs?per_page=100" \
               --jq "[.workflow_runs[] | select(.status != \"completed\") | select(.id < $GITHUB_RUN_ID)] | length" 2>/dev/null)
             if [ "${active:-0}" -gt 0 ]; then

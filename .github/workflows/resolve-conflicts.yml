@@ -15,16 +15,21 @@ on:
         description: "Max conflicting PRs to process per run"
         type: string
         default: "10"
+      force:
+        description: "Force this run even if another is already active (bypass overlap guard)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   id-token: write   # claude-code-action fetches a GitHub OIDC token during setup
 
 # No `concurrency` group on purpose. A group with cancel-in-progress:false would QUEUE a
-# scheduled tick that arrives mid-run and run it right after — but we want such ticks
+# scheduler tick that arrives mid-run and run it right after — but we want such ticks
 # SKIPPED. Overlap is instead prevented by the skip-guard at the top of `discover` below
-# (it drops the run when an older run of this workflow is still active). `discover` also
-# skips the (AI) resolve job entirely when none of your open PRs are currently conflicting.
+# (it drops the run when an older run of this workflow is still active, unless `force`
+# input is true for an explicit human override). `discover` also skips the (AI) resolve
+# job entirely when none of your open PRs are currently conflicting.
 
 jobs:
   # ---- Discover (no AI): skip the run when it would overlap OR there's nothing to do -----
@@ -48,9 +53,10 @@ jobs:
           set +e
 
           # Skip-guard: if another (older) run of THIS workflow is still active, drop this run so
-          # scheduled ticks never overlap (manual dispatch bypasses this). Run ids increase
-          # monotonically, so we yield only to an OLDER run — if two ever race, exactly one wins.
-          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]; then
+          # scheduler ticks never overlap. Set the `force` input to bypass for human re-runs.
+          # Run ids increase monotonically, so we yield only to an OLDER run — if two ever race,
+          # exactly one wins.
+          if [ "${{ inputs.force }}" != "true" ]; then
             active=$(gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/resolve-conflicts.yml/runs?per_page=100" \
               --jq "[.workflow_runs[] | select(.status != \"completed\") | select(.id < $GITHUB_RUN_ID)] | length" 2>/dev/null)
             if [ "${active:-0}" -gt 0 ]; then
