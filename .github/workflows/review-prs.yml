@@ -123,8 +123,10 @@ jobs:
             esac
             sha=$(printf '%s' "$view" | jq -r '.headRefOid')
 
-            # Latest autopilot-review marker on the PR (empty if never reviewed).
-            marker=$(printf '%s' "$view" | jq -r '.comments[].body' \
+            # Latest autopilot-review marker on the PR (empty if never reviewed). Restrict to
+            # comments authored by US ($ME) — these markers are always written by the PAT
+            # identity, so a marker forged by a third-party commenter must be ignored.
+            marker=$(printf '%s' "$view" | jq -r --arg me "$ME" '.comments[] | select(.author.login == $me) | .body' \
               | grep -o '<!-- autopilot-review headSha=[^ ]* verdict=[^ ]* round=[0-9]* -->' | tail -n1)
             mSha=$(printf '%s' "$marker" | sed -n 's/.*headSha=\([^ ]*\).*/\1/p')
             mRnd=$(printf '%s' "$marker" | sed -n 's/.*round=\([0-9][0-9]*\).*/\1/p')
