@@ -26,6 +26,7 @@ on:
       - "Resolve PR Conflicts"
       - "Suggest Improvement Issues"
       - "Implement Issues"
+      - "Usage Report"
     types: [completed] # refresh on ANY conclusion (we want failures shown too)
   workflow_dispatch:
 
@@ -93,6 +94,7 @@ jobs:
             "Address Review Feedback|address-review.yml|*/15 * * * *"
             "Resolve PR Conflicts|resolve-conflicts.yml|*/15 * * * *"
             "Suggest Improvement Issues|suggest-issues.yml|0 18 * * *"
+            "Usage Report|usage-report.yml|0 18 * * *"
             "Implement Issues|implement-issues.yml|"
           )
           for entry in "${workflows[@]}"; do

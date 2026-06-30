@@ -114,6 +114,24 @@ ts_pairs_for_slack=$(
 )
 check "index.ts (file→cron)" "$ts_pairs_for_slack" "slack.yml (file→cron)" "$slack_pairs"
 
+# Check 3: every scheduler-dispatched workflow must appear in the slack.yml board.
+# slack.yml itself is excluded: the board cannot report on itself without recursion.
+# Files tracked with an empty cron (chain-triggered) are already covered by existing
+# board entries; this check only enforces that scheduler-driven workflows are listed.
+ts_files_scheduled=$(echo "$ts_pairs" | cut -d= -f1 | grep -v '^slack\.yml$' | sort)
+slack_files_all=$(
+  sed -n '/workflows=(/,/^\s*)/p' "$slack_file" \
+    | grep -oP '"[^|"]+\|([^|"]+)\|[^"]*"' \
+    | awk -F'|' '{gsub(/^"/, "", $2); print $2}' \
+    | sort
+)
+missing=$(comm -23 <(echo "$ts_files_scheduled") <(echo "$slack_files_all"))
+if [ -n "$missing" ]; then
+  echo "❌ Scheduler-dispatched workflows missing from the slack.yml board:"
+  echo "$missing" | sed 's/^/  /'
+  fail=1
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "✅ Cron schedules are in sync across $ts_file, $tf_file, and $slack_file"
   echo "   Cron set:          $(echo "$ts_crons" | tr '\n' ' ')"
