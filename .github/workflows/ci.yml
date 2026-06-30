@@ -87,6 +87,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.5
+          terraform_wrapper: false
       - run: terraform fmt -check -recursive
       - run: terraform init -backend=false
       - uses: actions/setup-node@v4
