@@ -2,7 +2,10 @@ name: Suggest Improvement Issues
 
 # Plain GitHub Actions workflow (NOT gh-aw): runs Anthropic's official Claude Code
 # Action authenticated with a Claude Max subscription (CLAUDE_CODE_OAUTH_TOKEN), so model
-# usage is covered by your Max plan — no extra API/Copilot billing. Runs daily on a schedule + manual dispatch.
+# usage is covered by your Max plan — no extra API/Copilot billing.
+#
+# Triggered via workflow_dispatch only; the daily 18:00 UTC cadence is driven by the
+# Cloudflare scheduler (infra/scheduler/src/index.ts), not a GitHub schedule:.
 
 on:
   workflow_dispatch:
