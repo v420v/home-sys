@@ -31,7 +31,7 @@ infra/
 ## Deploy
 
 Prerequisites: a Cloudflare account and a GitHub PAT. `nix develop` provides the
-`terraform` and `node` CLIs (or install Terraform ≥ 1.6 and Node ≥ 20 yourself).
+`terraform` and `node` CLIs (or install Terraform ≥ 1.6 and Node ≥ 22 yourself).
 
 1. **GitHub token** — fine-grained PAT scoped to this repo with **Actions: Read
    and write** (or a classic PAT with `repo` + `workflow`). The Worker uses it to
