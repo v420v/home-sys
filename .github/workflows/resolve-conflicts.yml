@@ -67,6 +67,12 @@ jobs:
             fi
           fi
 
+          # Scope to repos you OWN and have STARRED — same set used by review-prs /
+          # address-review / implement-issues. PRs outside this set (e.g. contributions to
+          # third-party projects) must never be touched by this workflow.
+          stars=$(gh api user/starred --paginate --jq ".[] | select(.owner.login==\"$ME\") | .full_name")
+          if [ -z "$stars" ]; then echo "No starred-own repos found — nothing to do."; fi
+
           # Is at least one of MY open PRs currently CONFLICTING? If not, skip the AI resolve
           # job. Mirrors the resolve step's own filter; UNKNOWN mergeable (GitHub still
           # computing) is treated as not-yet-actionable and retried on the next run.
@@ -76,6 +82,12 @@ jobs:
             R=$(printf '%s' "$url" | sed -n 's#https://github.com/\([^/]*/[^/]*\)/pull/.*#\1#p')
             n=$(printf '%s' "$url" | sed -n 's#.*/pull/\([0-9][0-9]*\).*#\1#p')
             { [ -z "$R" ] || [ -z "$n" ]; } && continue
+
+            # Skip PRs that aren't in a starred-own repo (the scope guard).
+            if ! printf '%s\n' "$stars" | grep -qxF "$R"; then
+              echo "skip ${R}#${n}: not a starred-own repo"; continue
+            fi
+
             view=$(gh pr view "$n" --repo "$R" --json state,mergeable,headRefName 2>/dev/null)
             [ -z "$view" ] && continue
             [ "$(printf '%s' "$view" | jq -r '.state')" != "OPEN" ] && continue
@@ -143,12 +155,18 @@ jobs:
 
             ## Step 1 — Find candidate PRs
             1. `ME=$(gh api user --jq .login)` and print it.
-            2. List ME's open PRs across GitHub:
+            2. Compute ME's starred-own repos (the SAME scope guard used by review-prs /
+               address-review / implement-issues):
+               `stars=$(gh api user/starred --paginate --jq ".[] | select(.owner.login==\"$ME\") | .full_name")`.
+            3. List ME's open PRs across GitHub:
                `gh search prs --author "@me" --state open "archived:false" --json url --limit 100`.
                Parse out each `owner`, `repo`, and `number`.
 
             ## Step 2 — Filter to processable conflicts
-            For each candidate, `gh pr view <number> --repo <owner>/<repo> --json author,state,mergeable,headRefName,baseRefName,headRepository,headRepositoryOwner,isCrossRepository,url`
+            For each candidate, first SKIP it (printing "not a starred-own repo") unless
+            `owner/repo` is present in `stars` — this workflow must act ONLY on your own PRs in
+            repos you both own and have starred, never on contributions to third-party projects.
+            Then `gh pr view <number> --repo <owner>/<repo> --json author,state,mergeable,headRefName,baseRefName,headRepository,headRepositoryOwner,isCrossRepository,url`
             and SKIP it (printing the reason) unless ALL hold:
             - author login == `ME`; state == `OPEN`;
             - `mergeable` == `CONFLICTING` (if `UNKNOWN`, GitHub is still computing — skip and let the next run retry);
