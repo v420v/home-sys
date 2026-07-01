@@ -2,11 +2,6 @@
 .terraform/
 .terraform.tfstate.lock.info
 
-# Provider lock: not committed — `terraform init` regenerates it, and the
-# `~> 5.8` constraint in versions.tf bounds the provider (avoids terraform-vs-
-# OpenTofu registry-flavor conflicts in a committed lock).
-.terraform.lock.hcl
-
 # State (may contain the github_token secret) — never commit
 *.tfstate
 *.tfstate.*
