@@ -14,6 +14,8 @@ Life-automation batches: scheduled / manual GitHub Actions that run
 | [implement-issues](.github/workflows/implement-issues.yml) | Implement open issues as draft PRs | after suggest-issues + manual |
 | [review-prs](.github/workflows/review-prs.yml) | Review your open PRs for correctness; record an approve / changes-requested verdict on each | after implement-issues / address-review + every 15m (Cloudflare) + manual |
 | [address-review](.github/workflows/address-review.yml) | Read changes-requested verdicts and push fixes to the PR's head branch (the "redo" worker) | after review-prs + every 15m (Cloudflare) + manual |
+| [slack](.github/workflows/slack.yml) | Post/update the single Slack status board (#autopilot-status) with each workflow's last run and next scheduled run | every 15m (Cloudflare) + on workflow_run + manual |
+| [usage-report](.github/workflows/usage-report.yml) | Post a daily Claude usage/cost digest (#autopilot-reports) | daily 03:00 JST (Cloudflare) + manual |
 
 The **review-prs ⇄ address-review** loop is bounded: `review-prs` records a verdict in a
 machine-readable marker comment on the PR, `address-review` fixes and pushes (moving the head
