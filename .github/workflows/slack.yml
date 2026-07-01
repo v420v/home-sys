@@ -161,7 +161,19 @@ jobs:
               echo "chat.postMessage failed: $(echo "$resp" | jq -r '.error // "unknown"')"; echo "$resp"; exit 1
             fi
             newts=$(echo "$resp" | jq -r '.ts')
-            gh variable set SLACK_BOARD_TS --repo "$REPO" --body "$newts"
+            saved=""
+            for attempt in 1 2 3; do
+              if gh variable set SLACK_BOARD_TS --repo "$REPO" --body "$newts" 2>&1; then
+                saved="1"; break
+              fi
+              echo "::warning::gh variable set SLACK_BOARD_TS failed (attempt $attempt/3)"
+              sleep $((attempt * 2))
+            done
+            if [ -z "$saved" ]; then
+              echo "::error::gh variable set SLACK_BOARD_TS failed after retries — deleting just-posted board (ts=$newts) to avoid a duplicate next run"
+              slack chat.delete "$(jq -n --arg ch "$SLACK_CHANNEL_ID" --arg ts "$newts" '{channel:$ch, ts:$ts}')" || true
+              exit 1
+            fi
             posted="posted new board (ts=$newts; saved SLACK_BOARD_TS)"
           fi
           echo "Slack board: $posted"
