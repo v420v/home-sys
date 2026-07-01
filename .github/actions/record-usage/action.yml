@@ -163,12 +163,18 @@ runs:
             git -C "$TMP" add -A
             git -C "$TMP" commit -q -m "usage: ${RUN_ID} ${REL}"
             ok=0
-            for attempt in 1 2 3 4 5; do
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
               if git -C "$TMP" push -q origin "HEAD:$BRANCH" 2>/dev/null; then ok=1; break; fi
-              git -C "$TMP" fetch -q --depth 50 origin "$BRANCH" 2>/dev/null \
+              # Un-shallow on retry: a --depth-limited re-fetch can land a merge base
+              # outside the shallow window once enough commits have piled up on a busy
+              # branch, aborting the rebase for no progress. `--unshallow` fetches full
+              # history once; it errors (harmlessly) on an already-complete repo, so fall
+              # back to a normal fetch in that case.
+              (git -C "$TMP" fetch -q --unshallow origin "$BRANCH" 2>/dev/null \
+                 || git -C "$TMP" fetch -q origin "$BRANCH" 2>/dev/null) \
                 && git -C "$TMP" rebase -q FETCH_HEAD 2>/dev/null \
                 || git -C "$TMP" rebase --abort 2>/dev/null || true
-              sleep $(( (RANDOM % 5) + attempt ))
+              sleep $(( (RANDOM % 10) + attempt * 2 ))
             done
             [ "$ok" = 1 ] || { echo "push failed after retries"; exit 1; }
           ) || warn "failed to append usage record to $BRANCH (recording is best-effort)"
